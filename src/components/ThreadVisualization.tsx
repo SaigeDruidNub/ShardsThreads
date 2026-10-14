@@ -7,6 +7,7 @@ interface ThreadVisualizationProps {
   primary: ThreadColor;
   secondary: ThreadColor;
   tertiary?: ThreadColor;
+  fourth?: ThreadColor;
   hasShadowVein?: boolean;
 }
 
@@ -14,11 +15,13 @@ export const ThreadVisualization: React.FC<ThreadVisualizationProps> = ({
   primary,
   secondary,
   tertiary,
+  fourth,
   hasShadowVein,
 }) => {
   const pLore = THREAD_LORE[primary];
   const sLore = THREAD_LORE[secondary];
   const tLore = tertiary ? THREAD_LORE[tertiary] : undefined;
+  const fourthLore = fourth ? THREAD_LORE[fourth] : undefined;
 
   return (
     <div className="relative w-full overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/80 p-6 shadow-2xl backdrop-blur-md">
@@ -26,7 +29,7 @@ export const ThreadVisualization: React.FC<ThreadVisualizationProps> = ({
       <div
         className="pointer-events-none absolute -inset-1 opacity-25 blur-3xl transition-all duration-1000"
         style={{
-          background: `radial-gradient(circle at 50% 50%, ${pLore.hex}, ${sLore.hex}, ${tLore ? tLore.hex : "transparent"}, transparent 70%)`,
+          background: `radial-gradient(circle at 50% 50%, ${pLore.hex}, ${sLore.hex}, ${tLore ? tLore.hex : "transparent"}, ${fourthLore ? fourthLore.hex : "transparent"}, transparent 70%)`,
         }}
       />
 
@@ -106,6 +109,32 @@ export const ThreadVisualization: React.FC<ThreadVisualizationProps> = ({
                 </linearGradient>
               )}
 
+              {fourthLore && (
+                <linearGradient
+                  id="loomGradFourth"
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="0%"
+                >
+                  <stop
+                    offset="0%"
+                    stopColor={fourthLore.accentHex}
+                    stopOpacity="0.15"
+                  />
+                  <stop
+                    offset="50%"
+                    stopColor={fourthLore.hex}
+                    stopOpacity="0.7"
+                  />
+                  <stop
+                    offset="100%"
+                    stopColor={fourthLore.accentHex}
+                    stopOpacity="0.15"
+                  />
+                </linearGradient>
+              )}
+
               <filter
                 id="glowEffect"
                 x="-20%"
@@ -144,6 +173,18 @@ export const ThreadVisualization: React.FC<ThreadVisualizationProps> = ({
                 strokeDasharray="16 4"
                 filter="url(#glowEffect)"
                 opacity="0.85"
+              />
+            )}
+
+            {fourthLore && (
+              <path
+                d="M 10 80 C 70 125, 200 35, 300 80 C 400 125, 520 35, 590 80"
+                stroke="url(#loomGradFourth)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeDasharray="3 6"
+                filter="url(#glowEffect)"
+                opacity="0.9"
               />
             )}
 
@@ -223,6 +264,19 @@ export const ThreadVisualization: React.FC<ThreadVisualizationProps> = ({
               <span className="font-medium text-slate-400">
                 Tertiary:{" "}
                 <strong className="text-slate-300">{tLore.name}</strong>
+              </span>
+            </div>
+          )}
+
+          {fourthLore && (
+            <div className="flex items-center gap-2">
+              <span
+                className="h-2.5 w-2.5 rounded-full ring-1 ring-white/20"
+                style={{ backgroundColor: fourthLore.hex }}
+              />
+              <span className="font-medium text-slate-500">
+                Fourth:{" "}
+                <strong className="text-slate-400">{fourthLore.name}</strong>
               </span>
             </div>
           )}

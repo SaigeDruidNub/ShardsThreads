@@ -4,6 +4,7 @@ export interface CalculationResult {
   primary: ThreadColor;
   secondary: ThreadColor;
   tertiary?: ThreadColor;
+  fourth?: ThreadColor;
   scores: Record<ThreadColor, number>;
   totalScore: number;
   hasShadowVein: boolean;
@@ -17,6 +18,41 @@ export interface LoomEvaluation {
   tiedSecondaryColors: ThreadColor[];
   scores: Record<ThreadColor, number>;
   defaultResult: CalculationResult;
+}
+
+export interface AdditionalThreadTie {
+  candidates: ThreadColor[];
+  alreadySelected: ThreadColor[];
+  slotsToChoose: number;
+}
+
+export function getAdditionalThreadTie(
+  primary: ThreadColor,
+  secondary: ThreadColor,
+  scores: Record<ThreadColor, number>,
+): AdditionalThreadTie | null {
+  const minimumScore = Math.max(2, Math.ceil(scores[primary] * 0.25));
+  const eligible = (Object.keys(scores) as ThreadColor[])
+    .filter(
+      (color) =>
+        color !== primary &&
+        color !== secondary &&
+        scores[color] >= minimumScore,
+    )
+    .sort((a, b) => scores[b] - scores[a]);
+
+  if (eligible.length <= 2) return null;
+
+  const cutoffScore = scores[eligible[1]];
+  const alreadySelected = eligible.filter(
+    (color) => scores[color] > cutoffScore,
+  );
+  const candidates = eligible.filter((color) => scores[color] === cutoffScore);
+  const slotsToChoose = 2 - alreadySelected.length;
+
+  return candidates.length > slotsToChoose
+    ? { candidates, alreadySelected, slotsToChoose }
+    : null;
 }
 
 export function evaluateLoomScores(
@@ -92,19 +128,24 @@ export function buildCalculationResult(
   primary: ThreadColor,
   secondary: ThreadColor,
   scores: Record<ThreadColor, number>,
+  selectedAdditional?: ThreadColor[],
 ): CalculationResult {
   const totalScore = Object.values(scores).reduce((sum, val) => sum + val, 0);
   const hasShadowVein = (scores.black || 0) >= 3 && primary !== "black";
 
-  // Determine tertiary thread (highest remaining score that is > 0)
-  const remainingAfterSec = (Object.keys(scores) as ThreadColor[]).filter(
-    (c) => c !== primary && c !== secondary,
-  );
-  remainingAfterSec.sort((a, b) => (scores[b] || 0) - (scores[a] || 0));
-  const tertiary =
-    remainingAfterSec.length > 0 && (scores[remainingAfterSec[0]] || 0) > 0
-      ? remainingAfterSec[0]
-      : undefined;
+  const minimumAdditionalScore = Math.max(2, Math.ceil(scores[primary] * 0.25));
+  const eligibleAdditional = (Object.keys(scores) as ThreadColor[])
+    .filter(
+      (color) =>
+        color !== primary &&
+        color !== secondary &&
+        scores[color] >= minimumAdditionalScore,
+    )
+    .sort((a, b) => scores[b] - scores[a]);
+  const additional = (selectedAdditional ?? eligibleAdditional)
+    .filter((color) => eligibleAdditional.includes(color))
+    .slice(0, 2);
+  const [tertiary, fourth] = additional;
 
   let flavorSummary = "";
 
@@ -150,6 +191,7 @@ export function buildCalculationResult(
     primary,
     secondary,
     tertiary,
+    fourth,
     scores,
     totalScore,
     hasShadowVein,

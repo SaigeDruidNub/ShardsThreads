@@ -5,6 +5,7 @@ import { QUESTIONS, ThreadColor, THREAD_LORE } from "../data/threadLore";
 import {
   evaluateLoomScores,
   buildCalculationResult,
+  getAdditionalThreadTie,
   CalculationResult,
 } from "../data/threadEngine";
 import { analyzePlayerClass, KNOWN_CLASSES } from "../data/classAffinity";
@@ -27,9 +28,13 @@ const baseScores: Record<ThreadColor, number> = {
 type QuestionnairePhase = "class-input" | "questions" | "tiebreaker" | "result";
 
 interface TieState {
-  type: "primary" | "secondary";
+  type: "primary" | "secondary" | "additional";
   candidates: ThreadColor[];
   resolvedPrimary?: ThreadColor;
+  resolvedSecondary?: ThreadColor;
+  alreadySelected?: ThreadColor[];
+  selectedColors?: ThreadColor[];
+  slotsToChoose?: number;
 }
 
 export const ThreadQuestionnaire: React.FC = () => {
@@ -53,6 +58,34 @@ export const ThreadQuestionnaire: React.FC = () => {
     setScores(startingScores);
     setCurrentQuestionIdx(0);
     setPhase("questions");
+  };
+
+  const finishReading = (
+    primary: ThreadColor,
+    secondary: ThreadColor,
+    finalScores = scores,
+  ) => {
+    const additionalTie = getAdditionalThreadTie(
+      primary,
+      secondary,
+      finalScores,
+    );
+    if (additionalTie) {
+      setTieState({
+        type: "additional",
+        candidates: additionalTie.candidates,
+        resolvedPrimary: primary,
+        resolvedSecondary: secondary,
+        alreadySelected: additionalTie.alreadySelected,
+        selectedColors: [],
+        slotsToChoose: additionalTie.slotsToChoose,
+      });
+      setPhase("tiebreaker");
+      return;
+    }
+
+    setResult(buildCalculationResult(primary, secondary, finalScores));
+    setPhase("result");
   };
 
   const handleSelectOption = (optionIndex: number) => {
@@ -91,8 +124,11 @@ export const ThreadQuestionnaire: React.FC = () => {
         });
         setPhase("tiebreaker");
       } else {
-        setResult(loomEval.defaultResult);
-        setPhase("result");
+        finishReading(
+          loomEval.defaultResult.primary,
+          loomEval.defaultResult.secondary,
+          newScores,
+        );
       }
     }
   };
@@ -109,13 +145,7 @@ export const ThreadQuestionnaire: React.FC = () => {
       let chosenSecondary: ThreadColor;
       if (remainingCandidates.length === 1) {
         chosenSecondary = remainingCandidates[0];
-        const finalResult = buildCalculationResult(
-          chosenColor,
-          chosenSecondary,
-          scores,
-        );
-        setResult(finalResult);
-        setPhase("result");
+        finishReading(chosenColor, chosenSecondary);
       } else if (remainingCandidates.length > 1) {
         // If 3-way tie, let them choose secondary next
         setTieState({
@@ -128,19 +158,39 @@ export const ThreadQuestionnaire: React.FC = () => {
           scores,
           chosenColor,
         ).defaultResult;
-        setResult(finalResult);
-        setPhase("result");
+        finishReading(finalResult.primary, finalResult.secondary);
       }
     } else {
-      // Secondary tie resolved
-      const finalResult = buildCalculationResult(
-        tieState.resolvedPrimary || "grey",
-        chosenColor,
-        scores,
-      );
-      setResult(finalResult);
-      setPhase("result");
+      if (tieState.type === "additional") {
+        const selectedColors = tieState.selectedColors ?? [];
+        const nextSelection = selectedColors.includes(chosenColor)
+          ? selectedColors.filter((color) => color !== chosenColor)
+          : [...selectedColors, chosenColor];
+        if (nextSelection.length <= (tieState.slotsToChoose ?? 1)) {
+          setTieState({ ...tieState, selectedColors: nextSelection });
+        }
+        return;
+      }
+
+      finishReading(tieState.resolvedPrimary || "grey", chosenColor);
     }
+  };
+
+  const confirmAdditionalThreads = () => {
+    if (!tieState || tieState.type !== "additional") return;
+    const selectedColors = tieState.selectedColors ?? [];
+    if (selectedColors.length !== tieState.slotsToChoose) return;
+
+    const additional = [...(tieState.alreadySelected ?? []), ...selectedColors];
+    setResult(
+      buildCalculationResult(
+        tieState.resolvedPrimary || "grey",
+        tieState.resolvedSecondary || "red",
+        scores,
+        additional,
+      ),
+    );
+    setPhase("result");
   };
 
   const handleReset = () => {
@@ -286,6 +336,8 @@ export const ThreadQuestionnaire: React.FC = () => {
   // Render Phase 2: Crossroads Tie-Breaker
   if (phase === "tiebreaker" && tieState) {
     const isPrimaryTie = tieState.type === "primary";
+    const isAdditionalTie = tieState.type === "additional";
+    const selectedAdditional = tieState.selectedColors ?? [];
 
     return (
       <div className="mx-auto w-full max-w-4xl space-y-6 animate-fadeIn">
@@ -298,7 +350,9 @@ export const ThreadQuestionnaire: React.FC = () => {
             <h2 className="mt-2 font-serif text-3xl font-extrabold text-white">
               {isPrimaryTie
                 ? "Equal Strands in the Loom"
-                : "A Tie in the Secondary Weave"}
+                : isAdditionalTie
+                  ? "The Fourth Strand at the Crossroads"
+                  : "A Tie in the Secondary Weave"}
             </h2>
             <p className="mx-auto mt-2 max-w-2xl text-sm text-slate-300 leading-relaxed">
               &ldquo;Halt the shuttle! Remarkable, Aspirant—the loom does not
@@ -310,7 +364,9 @@ export const ThreadQuestionnaire: React.FC = () => {
             <p className="mt-2 text-xs font-semibold text-amber-400">
               {isPrimaryTie
                 ? "Select which calling stands as your Dominant (Primary) Destiny:"
-                : "Select which calling weaves in as your Secondary Nuance:"}
+                : isAdditionalTie
+                  ? `Choose ${tieState.slotsToChoose} color${tieState.slotsToChoose === 1 ? "" : "s"} to complete your thread. These affinities tied at the four-strand limit.`
+                  : "Select which calling weaves in as your Secondary Nuance:"}
             </p>
           </div>
 
@@ -325,7 +381,16 @@ export const ThreadQuestionnaire: React.FC = () => {
                     e.currentTarget.blur();
                     handleResolveTie(colKey);
                   }}
-                  className="group relative rounded-xl border border-slate-700 bg-slate-950/70 p-5 text-left transition-all hover:scale-[1.02] hover:border-amber-400 hover:bg-slate-800/80 hover:shadow-xl active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                  aria-pressed={
+                    isAdditionalTie
+                      ? selectedAdditional.includes(colKey)
+                      : undefined
+                  }
+                  className={`group relative rounded-xl border p-5 text-left transition-all hover:scale-[1.02] hover:border-amber-400 hover:bg-slate-800/80 hover:shadow-xl active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
+                    isAdditionalTie && selectedAdditional.includes(colKey)
+                      ? "border-amber-400 bg-amber-950/40"
+                      : "border-slate-700 bg-slate-950/70"
+                  }`}
                 >
                   <div className="flex items-center gap-3 mb-3">
                     <span
@@ -358,12 +423,30 @@ export const ThreadQuestionnaire: React.FC = () => {
                   </div>
 
                   <div className="mt-4 flex items-center justify-end text-xs font-semibold text-amber-400 group-hover:translate-x-1 transition-transform">
-                    Claim this Thread →
+                    {isAdditionalTie
+                      ? selectedAdditional.includes(colKey)
+                        ? "Selected"
+                        : "Select this strand"
+                      : "Claim this Thread →"}
                   </div>
                 </button>
               );
             })}
           </div>
+
+          {isAdditionalTie && (
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={confirmAdditionalThreads}
+                disabled={selectedAdditional.length !== tieState.slotsToChoose}
+                className="rounded-md bg-amber-500 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Confirm selected strands ({selectedAdditional.length}/
+                {tieState.slotsToChoose})
+              </button>
+            </div>
+          )}
 
           <div className="mt-6 text-center text-xs text-slate-500 italic">
             &ldquo;When mortals choose with intention, the cloth never
@@ -383,6 +466,7 @@ export const ThreadQuestionnaire: React.FC = () => {
           primary={result.primary}
           secondary={result.secondary}
           tertiary={result.tertiary}
+          fourth={result.fourth}
           hasShadowVein={result.hasShadowVein}
         />
 
@@ -431,6 +515,20 @@ export const ThreadQuestionnaire: React.FC = () => {
                     </span>
                   </>
                 )}
+                {result.fourth && (
+                  <>
+                    <span className="text-slate-600">•</span>
+                    <span>
+                      Fourth Strand:{" "}
+                      <span
+                        className="font-semibold"
+                        style={{ color: THREAD_LORE[result.fourth].hex }}
+                      >
+                        {THREAD_LORE[result.fourth].name}
+                      </span>
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -452,7 +550,7 @@ export const ThreadQuestionnaire: React.FC = () => {
 
           {/* Deep dive into callings */}
           <div
-            className={`grid grid-cols-1 ${result.tertiary ? "md:grid-cols-3" : "md:grid-cols-2"} gap-4`}
+            className={`grid grid-cols-1 ${result.fourth ? "md:grid-cols-2" : result.tertiary ? "md:grid-cols-3" : "md:grid-cols-2"} gap-4`}
           >
             {/* Primary */}
             <div className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-5 space-y-3">
@@ -541,6 +639,40 @@ export const ThreadQuestionnaire: React.FC = () => {
                   </span>
                   <div className="flex flex-wrap gap-1.5">
                     {THREAD_LORE[result.tertiary].colonyRoles.map((role) => (
+                      <span
+                        key={role}
+                        className="rounded-md bg-slate-800/80 px-2.5 py-1 text-xs text-slate-300"
+                      >
+                        {role}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {result.fourth && (
+              <div className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-5 space-y-3">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="h-3 w-3 rounded-full ring-1 ring-white/20"
+                    style={{
+                      backgroundColor: THREAD_LORE[result.fourth].hex,
+                    }}
+                  />
+                  <h4 className="font-serif text-base font-bold text-white">
+                    Fourth Strand: {THREAD_LORE[result.fourth].calling}
+                  </h4>
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  {THREAD_LORE[result.fourth].antollustNotes}
+                </p>
+                <div className="pt-2">
+                  <span className="text-xs font-semibold uppercase text-slate-400 block mb-1">
+                    Related Colony Roles:
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {THREAD_LORE[result.fourth].colonyRoles.map((role) => (
                       <span
                         key={role}
                         className="rounded-md bg-slate-800/80 px-2.5 py-1 text-xs text-slate-300"
